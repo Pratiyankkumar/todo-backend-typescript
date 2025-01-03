@@ -1,0 +1,8 @@
+node_modules
+dist
+# Keep environment variables out of version control
+.env
+# Prisma Generated Files
+prisma/.env
+prisma/migrations/
+prisma/generated/
