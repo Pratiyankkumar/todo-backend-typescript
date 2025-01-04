@@ -1,5 +1,11 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient, Prisma } from "@prisma/client";
+import {
+  PrismaErrorCode,
+  PrismaErrorMessages,
+} from "../constants/prismaErrors";
+import { StatusCode } from "../constants/statusCodes";
+import { sendErrorResponse } from "../utils/responseHelpers";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -25,41 +31,9 @@ const createUser = async (
       },
     });
 
-    if (!user) {
-      throw new Error("An Error Occurred while creating a user");
-    }
-
-    res.send(user);
+    res.status(StatusCode.CREATED).send(user);
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      res.status(409).json({
-        error: error.message,
-        code: error.code,
-        meta: error.meta,
-      });
-      return;
-    }
-
-    if (error instanceof Prisma.PrismaClientValidationError) {
-      res.status(400).json({
-        error: error.message,
-        name: error.name,
-      });
-      return;
-    }
-
-    if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-      res.status(500).json({
-        error: error.message,
-        name: error.name,
-      });
-      return;
-    }
-
-    // For any other errors
-    res.status(500).json({
-      error: error instanceof Error ? error.message : "Internal Server Error",
-    });
+    sendErrorResponse(error, res);
   }
 };
 
@@ -73,13 +47,13 @@ router.get("/users", async (req: Request, res: Response): Promise<void> => {
     const users = await prisma.user.findMany({});
 
     if (users.length === 0) {
-      res.status(404).send("There are no users left");
+      res.status(StatusCode.NOT_FOUND).send("There are no users left");
       return;
     }
 
     res.send(users);
   } catch (err) {
-    res.status(500).send({ err });
+    res.status(StatusCode.INTERNAL_SERVER_ERROR).send({ err });
   }
 });
 
@@ -94,16 +68,9 @@ router.delete(
       });
 
       res.send(deletedUser);
-    } catch (err) {
+    } catch (error) {
       // Handle specific Prisma errors
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2025"
-      ) {
-        res.status(404).send({ message: "User not found" });
-        return;
-      }
-      res.status(500).send({ err });
+      sendErrorResponse(error, res);
     }
   }
 );
@@ -130,15 +97,8 @@ router.patch(
       });
 
       res.send(updatedUser);
-    } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2025"
-      ) {
-        res.status(404).send({ message: "User not found" });
-        return;
-      }
-      res.status(500).send({ err });
+    } catch (error) {
+      sendErrorResponse(error, res);
     }
   }
 );
