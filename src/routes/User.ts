@@ -1,20 +1,25 @@
 import { Router, Request, Response } from "express";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma, User } from "@prisma/client";
 import {
   PrismaErrorCode,
   PrismaErrorMessages,
 } from "../constants/prismaErrors";
 import { StatusCode } from "../constants/statusCodes";
 import { sendErrorResponse } from "../utils/responseHelpers";
+import { z } from "zod";
+import bcrypt from "bcryptjs";
 
 const router = Router();
 const prisma = new PrismaClient();
 
-interface CreateUserRequest {
-  name: string;
-  email: string;
-  lastName: string;
-}
+const CreateUserRequestSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().email("Invalid email address"),
+  lastName: z.string().min(1, "Last name too short").optional(),
+  password: z.string().min(7, "Password should have atleast 7 letters"),
+});
+
+type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 
 type RequestWithBody = Request<{}, any, CreateUserRequest>;
 
@@ -23,12 +28,21 @@ const createUser = async (
   res: Response
 ): Promise<void> => {
   try {
+    const inputData: CreateUserRequest = {
+      name: req.body.name,
+      email: req.body.email,
+      lastName: req.body.lastName,
+      password: req.body.password,
+    };
+
+    let validData = CreateUserRequestSchema.parse(inputData);
+
+    const password = await bcrypt.hash(validData.password, 8);
+    console.log(password);
+    validData = { ...validData, password };
+
     const user = await prisma.user.create({
-      data: {
-        name: req.body.name,
-        email: req.body.email,
-        lastName: req.body.lastName,
-      },
+      data: validData,
     });
 
     res.status(StatusCode.CREATED).send(user);
@@ -75,25 +89,27 @@ router.delete(
   }
 );
 
+const UpdateUserReqSchema = CreateUserRequestSchema.partial();
+
+type UpdateUserReq = z.infer<typeof UpdateUserReqSchema>;
+
 router.patch(
   "/user/:userId",
-  async (req: Request, res: Response): Promise<void> => {
+  async (req: Request<any, UpdateUserReq>, res: Response): Promise<void> => {
     try {
-      const userToBeUpdated = await prisma.user.findUnique({
-        where: {
-          id: Number(req.params.userId),
-        },
-      });
+      const inputData: UpdateUserReq = req.body;
+      let validData = UpdateUserReqSchema.parse(inputData);
+
+      if (validData.password) {
+        const password = await bcrypt.hash(validData.password, 8);
+        validData = { ...validData, password };
+      }
 
       const updatedUser = await prisma.user.update({
         where: {
           id: Number(req.params.userId),
         },
-        data: {
-          name: req.body.name || userToBeUpdated?.name,
-          lastName: req.body.lastName || userToBeUpdated?.lastName,
-          email: req.body.email || userToBeUpdated?.email,
-        },
+        data: validData,
       });
 
       res.send(updatedUser);
