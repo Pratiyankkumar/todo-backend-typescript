@@ -1,13 +1,11 @@
 import { Router, Request, Response } from "express";
-import { PrismaClient, Prisma, User } from "@prisma/client";
-import {
-  PrismaErrorCode,
-  PrismaErrorMessages,
-} from "../constants/prismaErrors";
+import { PrismaClient } from "@prisma/client";
 import { StatusCode } from "../constants/statusCodes";
 import { sendErrorResponse } from "../utils/responseHelpers";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import authMiddleware from "../middleware/authMiddleware";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -42,7 +40,26 @@ const createUser = async (
     validData = { ...validData, password };
 
     const user = await prisma.user.create({
-      data: validData,
+      data: {
+        ...validData,
+      },
+    });
+
+    const token = jwt.sign({ id: user.id }, "fuckITDamn");
+
+    await prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        tokens: {
+          create: [
+            {
+              token,
+            },
+          ],
+        },
+      },
     });
 
     res.status(StatusCode.CREATED).send(user);
@@ -56,23 +73,93 @@ router.post("/user", (req: Request, res: Response) =>
   createUser(req as RequestWithBody, res)
 );
 
-router.get("/users", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const users = await prisma.user.findMany({});
-
-    if (users.length === 0) {
-      res.status(StatusCode.NOT_FOUND).send("There are no users left");
-      return;
-    }
-
-    res.send(users);
-  } catch (err) {
-    res.status(StatusCode.INTERNAL_SERVER_ERROR).send({ err });
-  }
+const LoginUserRequestSchema = z.object({
+  email: z.string().email("Invalid Email Address"),
+  password: z.string(),
 });
+
+type LoginUserRequest = z.infer<typeof LoginUserRequestSchema>;
+
+router.post(
+  "/user/login",
+  async (req: Request<any, LoginUserRequest>, res: Response) => {
+    try {
+      const inputData: LoginUserRequest = req.body;
+
+      const validData = LoginUserRequestSchema.parse(inputData);
+      const user = await prisma.user.findUnique({
+        where: {
+          email: validData.email,
+        },
+      });
+
+      if (!user) {
+        res.status(StatusCode.NOT_FOUND).send({
+          message: "Sorry we cant find you account please sign up first",
+        });
+        return;
+      }
+
+      const isCorrectPass = await bcrypt.compare(
+        validData.password,
+        user.password
+      );
+
+      if (!isCorrectPass) {
+        res
+          .status(StatusCode.UNAUTHORIZED)
+          .send({ message: "The password you entered is incorrect" });
+        return;
+      }
+
+      const token = jwt.sign({ id: user.id }, "fuckITDamn");
+
+      await prisma.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          tokens: {
+            create: [
+              {
+                token,
+              },
+            ],
+          },
+        },
+      });
+
+      const { password, ...safeUser } = user;
+
+      res.send(safeUser);
+    } catch (err) {
+      sendErrorResponse(err, res);
+    }
+  }
+);
+
+router.get(
+  "/users",
+  authMiddleware,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const users = await prisma.user.findMany({});
+
+      if (users.length === 0) {
+        res.status(StatusCode.NOT_FOUND).send("There are no users left");
+        return;
+      }
+
+      res.send(users);
+    } catch (err) {
+      res.status(StatusCode.INTERNAL_SERVER_ERROR).send({ err });
+    }
+  }
+);
 
 router.delete(
   "/user/:userId",
+  authMiddleware,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const deletedUser = await prisma.user.delete({
@@ -95,6 +182,7 @@ type UpdateUserReq = z.infer<typeof UpdateUserReqSchema>;
 
 router.patch(
   "/user/:userId",
+  authMiddleware,
   async (req: Request<any, UpdateUserReq>, res: Response): Promise<void> => {
     try {
       const inputData: UpdateUserReq = req.body;

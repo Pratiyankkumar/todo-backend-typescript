@@ -7,30 +7,36 @@ import {
 import { StatusCode } from "../constants/statusCodes";
 import { todo } from "node:test";
 import { sendErrorResponse } from "../utils/responseHelpers";
+import authMiddleware from "../middleware/authMiddleware";
 
 const prisma = new PrismaClient();
 
 const router = express.Router();
 
-router.post("/todo", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const todo = await prisma.todo.create({
-      data: {
-        title: req.body.title,
-        content: req.body.content,
-        completed: req.body.completed,
-        authorId: req.body.authorId,
-      },
-    });
+router.post(
+  "/todo",
+  authMiddleware,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const todo = await prisma.todo.create({
+        data: {
+          title: req.body.title,
+          content: req.body.content,
+          completed: req.body.completed,
+          authorId: req.body.authorId,
+        },
+      });
 
-    res.status(StatusCode.OK).send(todo);
-  } catch (error) {
-    sendErrorResponse(error, res);
+      res.status(StatusCode.OK).send(todo);
+    } catch (error) {
+      sendErrorResponse(error, res);
+    }
   }
-});
+);
 
 router.get(
   "/todo/:userId",
+  authMiddleware,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = Number(req.params.userId);
